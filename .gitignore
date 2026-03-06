@@ -1,0 +1,7 @@
+# Generated files
+entries.json
+verge.rss
+fetch_verge.log
+
+# Claude local settings
+.claude/
