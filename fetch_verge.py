@@ -19,6 +19,9 @@ STORE_FILE = os.path.join(SCRIPT_DIR, "entries.json")
 OUTPUT_RSS = os.path.join(SCRIPT_DIR, "verge.rss")
 MAX_ENTRIES = 300
 USER_AGENT = "Mozilla/5.0 (compatible; verge-rss-aggregator/1.0)"
+# URL where verge.rss will be served (used in the feed's atom:link self reference).
+# Override via environment variable OUTPUT_RSS_URL if needed.
+OUTPUT_RSS_URL = os.environ.get("OUTPUT_RSS_URL", "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,23 +46,24 @@ def parse_atom(data: bytes) -> list[dict]:
         "atom": "http://www.w3.org/2005/Atom",
         "media": "http://search.yahoo.com/mrss/",
     }
+
+    def text(element, tag):
+        el = element.find(tag, NS)
+        return el.text if el is not None and el.text else ""
+
+    def attr(element, tag, attribute):
+        el = element.find(tag, NS)
+        return el.get(attribute, "") if el is not None else ""
+
     root = ET.fromstring(data)
     entries = []
     for entry in root.findall("atom:entry", NS):
-        def text(tag):
-            el = entry.find(tag, NS)
-            return el.text if el is not None and el.text else ""
-
-        def attr(tag, attribute):
-            el = entry.find(tag, NS)
-            return el.get(attribute, "") if el is not None else ""
-
-        link = attr("atom:link[@rel='alternate']", "href") or attr("atom:link", "href")
-        guid = text("atom:id") or link
-        title = text("atom:title")
-        summary = text("atom:summary") or text("atom:content")
-        published = text("atom:published") or text("atom:updated")
-        author = text("atom:author/atom:name")
+        link = attr(entry, "atom:link[@rel='alternate']", "href") or attr(entry, "atom:link", "href")
+        guid = text(entry, "atom:id") or link
+        title = text(entry, "atom:title")
+        summary = text(entry, "atom:summary") or text(entry, "atom:content")
+        published = text(entry, "atom:published") or text(entry, "atom:updated")
+        author = text(entry, "atom:author/atom:name")
 
         # Normalise published to RFC-2822 for RSS compatibility
         pub_dt = None
@@ -82,18 +86,18 @@ def parse_atom(data: bytes) -> list[dict]:
 
 def parse_rss(data: bytes) -> list[dict]:
     """Parse RSS 2.0 feed as fallback."""
+    def text(element, tag):
+        el = element.find(tag)
+        return el.text if el is not None and el.text else ""
+
     root = ET.fromstring(data)
     channel = root.find("channel")
     if channel is None:
         return []
     entries = []
     for item in channel.findall("item"):
-        def text(tag):
-            el = item.find(tag)
-            return el.text if el is not None and el.text else ""
-
-        guid = text("guid") or text("link")
-        published = text("pubDate")
+        guid = text(item, "guid") or text(item, "link")
+        published = text(item, "pubDate")
         pub_dt = None
         if published:
             try:
@@ -103,25 +107,35 @@ def parse_rss(data: bytes) -> list[dict]:
 
         entries.append({
             "guid": guid,
-            "title": text("title"),
-            "link": text("link"),
-            "summary": text("description"),
+            "title": text(item, "title"),
+            "link": text(item, "link"),
+            "summary": text(item, "description"),
             "published": pub_dt.isoformat() if pub_dt else published,
-            "author": text("author") or text("dc:creator"),
+            "author": text(item, "author") or text(item, "dc:creator"),
         })
     return entries
 
 
 def load_store() -> dict[str, dict]:
-    if os.path.exists(STORE_FILE):
+    if not os.path.exists(STORE_FILE):
+        return {}
+    try:
         with open(STORE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("Could not read store file (%s), starting fresh: %s", STORE_FILE, e)
+        return {}
 
 
 def save_store(store: dict[str, dict]):
-    with open(STORE_FILE, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=2)
+    tmp_file = STORE_FILE + ".tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, STORE_FILE)
+    except OSError as e:
+        log.error("Failed to save store file: %s", e)
+        raise
 
 
 def entry_datetime(entry: dict) -> datetime:
@@ -182,7 +196,7 @@ def generate_rss(entries: list[dict]) -> str:
     <description>The Verge - last {len(entries)} entries (locally aggregated)</description>
     <language>en-us</language>
     <lastBuildDate>{now_rfc}</lastBuildDate>
-    <atom:link href="" rel="self" type="application/rss+xml"/>
+    <atom:link href="{OUTPUT_RSS_URL}" rel="self" type="application/rss+xml"/>
 {items_xml}
   </channel>
 </rss>

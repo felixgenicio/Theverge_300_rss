@@ -14,7 +14,7 @@ Script que obtiene el RSS de The Verge cada 10 minutos y genera un fichero RSS l
 ## Ejecución manual
 
 ```bash
-python3 /home/suco/workspace/verge_rss/fetch_verge.py
+python3 /path/to/verge_rss/fetch_verge.py
 ```
 
 ## Programar la ejecución cada 10 minutos
@@ -28,7 +28,7 @@ crontab -e
 Añade:
 
 ```
-*/10 * * * * /usr/bin/python3 /home/suco/workspace/verge_rss/fetch_verge.py
+*/10 * * * * /usr/bin/python3 /path/to/verge_rss/fetch_verge.py
 ```
 
 ### Opción B: systemd timer (recomendado)
@@ -41,8 +41,8 @@ Description=Fetch The Verge RSS
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /home/suco/workspace/verge_rss/fetch_verge.py
-User=suco
+ExecStart=/usr/bin/python3 /path/to/verge_rss/fetch_verge.py
+User=YOUR_USER
 ```
 
 Crea `/etc/systemd/system/verge-rss.timer`:
@@ -79,7 +79,7 @@ journalctl -u verge-rss.service -f
 
 ```nginx
 location /verge.rss {
-    alias /home/suco/workspace/verge_rss/verge.rss;
+    alias /path/to/verge_rss/verge.rss;
     types { application/rss+xml rss; }
 }
 ```
@@ -87,7 +87,7 @@ location /verge.rss {
 ### Apache
 
 ```apache
-Alias /verge.rss /home/suco/workspace/verge_rss/verge.rss
+Alias /verge.rss /path/to/verge_rss/verge.rss
 <Files "verge.rss">
     ForceType application/rss+xml
 </Files>
