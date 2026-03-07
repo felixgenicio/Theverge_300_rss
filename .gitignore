@@ -3,5 +3,9 @@ entries.json
 verge.rss
 fetch_verge.log
 
+# Python cache
+__pycache__/
+*.pyc
+
 # Claude local settings
 .claude/
