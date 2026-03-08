@@ -7,6 +7,7 @@ Run every 10 minutes via cron or systemd timer.
 import json
 import logging
 import os
+import re
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -61,7 +62,8 @@ def parse_atom(data: bytes) -> list[dict]:
         link = attr(entry, "atom:link[@rel='alternate']", "href") or attr(entry, "atom:link", "href")
         guid = text(entry, "atom:id") or link
         title = text(entry, "atom:title")
-        summary = text(entry, "atom:summary") or text(entry, "atom:content")
+        summary = text(entry, "atom:summary")
+        content = text(entry, "atom:content")
         published = text(entry, "atom:published") or text(entry, "atom:updated")
         author = text(entry, "atom:author/atom:name")
 
@@ -73,6 +75,22 @@ def parse_atom(data: bytes) -> list[dict]:
             except ValueError:
                 pass
 
+        # Extract media image: try media:content/thumbnail first, then <img> in content HTML
+        image_url = ""
+        image_type = "image/jpeg"
+        media_content = entry.find("media:content", NS)
+        if media_content is not None:
+            image_url = media_content.get("url", "")
+            image_type = media_content.get("type", "image/jpeg")
+        if not image_url:
+            media_thumb = entry.find("media:thumbnail", NS)
+            if media_thumb is not None:
+                image_url = media_thumb.get("url", "")
+        if not image_url and content:
+            m = re.search(r'<img\b[^>]*\ssrc=["\']([^"\']+)["\']', content)
+            if m:
+                image_url = m.group(1).replace("&#038;", "&")
+
         entries.append({
             "guid": guid,
             "title": title,
@@ -80,6 +98,9 @@ def parse_atom(data: bytes) -> list[dict]:
             "summary": summary,
             "published": pub_dt.isoformat() if pub_dt else published,
             "author": author,
+            "content": content,
+            "image_url": image_url,
+            "image_type": image_type,
         })
     return entries
 
@@ -177,19 +198,31 @@ def generate_rss(entries: list[dict]) -> str:
         author = escape_xml(e.get("author") or "")
         pub = pub_date_rss(e)
 
+        content = e.get("content") or ""
+        image_url = e.get("image_url") or ""
+        image_type = e.get("image_type") or "image/jpeg"
+        image_tag = (
+            f'\n      <media:content url="{image_url}" medium="image" type="{image_type}"/>'
+            if image_url else ""
+        )
+        content_tag = (
+            f'\n      <content:encoded><![CDATA[{content}]]></content:encoded>'
+            if content else ""
+        )
+
         item = f"""    <item>
       <title>{title}</title>
       <link>{link}</link>
       <guid isPermaLink="false">{guid}</guid>
       <pubDate>{pub}</pubDate>
       <author>{author}</author>
-      <description><![CDATA[{summary}]]></description>
+      <description><![CDATA[{summary}]]></description>{image_tag}{content_tag}
     </item>"""
         items.append(item)
 
     items_xml = "\n".join(items)
     return f"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
     <title>The Verge (aggregated)</title>
     <link>https://www.theverge.com</link>
